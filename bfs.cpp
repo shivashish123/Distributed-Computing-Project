@@ -20,7 +20,7 @@ int messageCounter=0,listners=0;
 // mutex locks for mutual exclusion of shared variables
 mutex waitingSetLock,portmapLock,clientServerSocketLock,clientPortMapLock,serverSocketFdsLock,listenerLock,fileLock;
 vector <int> serverSocketfds;
-
+int finished = 0;
 /**
  * Helper Class for get the formatted time in HH:MM:SS 
  * */
@@ -48,75 +48,11 @@ class Helper {
     }
   
 };
-
-
-/**
- * Node class to simulate different nodes in a distributed system
- * Member Variables
- * id                    - Id of server (- n) 
- * serverSocket          - socket descriptor of server on which server is listening for messages
- * serverPort            - portNo of server
- * inDeg,outDeg          - indegree and outdegree of node in toplogy
- * clientListenerThreads - All the listener threads
- * messageSenderThreads  - All the sender threads to setup connection parallely
- * inDegreeVertices      - Incomming vertices in graph topology
- * outDegreeVertices     - Outgoing vertices in graph topology
- * server                - Thread to setup server port and listen for messages
- * senderThread          - Thread to send messages to different nodes
- * totalSent             - total Messages sent
- * int64_t t1            - storing time of message request sent in nanoseconds 
- *                       - (will be overwritten on every request)     
- * port_idx              - Map to store clientSockets for a correponding client port 
- * nodeLocalClock        - Local clock to read time in nanoseconds
- * exponential_lP        - Exponential number generator
- * exponential_lQ        - Exponential number generator
- * exponential_lSend     - Exponential number generator   
- * waitingForResponse    - Binary Semaphore to wait for message request to be fulfiled
- *                       - before sending other request
- * 
- * Member Methods 
- * 
- * initServerNode()      
- *  - Initializes server port and is part of server thread's funciton
- *    It accepts all the connections and stores all the connected sockets     
- *    in port_idx map
- * 
- * listenForMessage(clientId):
- *  - listen for a message comming from a particular client id
- * 
- * setUpConnectionPort(serverPort , serverId)
- *  - Set up socket file descriptor for a connection between current node 
- *  - and a server with id serverId, for sending message to that server   
- *    
- * sendMessage()          
- *  - send syncronization request to server k times selected randomly
- * 
- * sendMessageToSocket(int recieverSocket,string message)
- *  - Sends a string message to a given socket  
- * 
- * setUpConnectionPorts()
- *  - calls initConnection ports which start message sender threads
- *  - with sendMessage as execution function 
- * 
- * startListenerThreads()
- *  - calls initClientListnerThreads which 
- *  - starts listener Threads with listenMessage as execution function
- * 
- * sendMessageThread() *  - 
- *  - start a thread with sendMessage as execution sendMessage function 
- * 
- * parseString()
- *  - Parses message and breaks them into individiual messages 
- *  - each enclosed in  square brackets []
- * 
- * parseQueryString()
- *  - Parses message which are exchanged between servers
- *  - If starting character is q then it is query message asking for t2,t3
- *      "[q+(totalSent)+*+(id)+]";
- *  - If starting character is r then it is a query response message
- *      "[r+(t2)+*+(t3)+]"; 
- * 
- */
+enum State 
+{   
+	new_leaf,
+	interm
+};
 class Node{
 
     int id;
@@ -124,10 +60,13 @@ class Node{
     int serverSocket;
 	int serverPort;
 	int clientCounter = 1;
-    int inDeg,outDeg;
+    int parent = -1;
+    bool leaf = false , interm_flag = false;
+    set<int> childs,others,phased,finished;
+    int deg;
 	thread* clientListenerThreads;
 	thread* messageSenderThreads;
-    vector<int> inDegreeVertices ,outDegreeVertices;
+    vector<int> neighBourVertices;
     int* clientSocketIds ;
     thread server,senderThread; 
     sem_t waitingForResponse;
@@ -137,17 +76,16 @@ class Node{
     std::exponential_distribution<double>exponential_lP;
     std::exponential_distribution<double>exponential_lQ;
     std::exponential_distribution<double>exponential_lSend;
+	enum State state;
    
     public:
     Node(vector<int> neighBourVertices,int id){
-        cout<<id<<" :: ";
-        for(auto k:neighBourVertices)
-            cout<<k<<" ";
-        cout<<endl;
-        this->inDegreeVertices  = neighBourVertices; // indegree vertices in graph
-        this->outDegreeVertices = neighBourVertices; // outdegree vertices in graph
-        inDeg = inDegreeVertices.size();
-        outDeg = outDegreeVertices.size();
+        // cout<<id<<" :: ";
+        // for(auto k:neighBourVertices)
+        //     cout<<k<<" ";
+        // cout<<endl;
+        this->neighBourVertices  = neighBourVertices; // degree vertices in graph
+        deg  = neighBourVertices.size();
         clientSocketIds = new int[n + 1];  // client sockets
         clientListenerThreads = new thread[n + 1]; // threads memory allocation
         messageSenderThreads  = new thread[n + 1];
@@ -159,7 +97,7 @@ class Node{
         server.join();
         initClientListnerThreads();
     }
-    void setUpConnectionPorts(){ // setup conneciton ports for different recievers (outdegree)
+    void setUpConnectionPorts(){ // setup conneciton ports for different recievers (degree)
         initConnectionPorts();
     }
     void sendMessageThread(){ // start message sender thread
@@ -171,10 +109,10 @@ class Node{
     }
     ~Node(){ // Destructor        
 
-        for(int i=0;i<inDeg;i++)
+        for(int i=0;i<deg;i++)
             clientListenerThreads[i].join();
 
-        for(int i=0;i<outDeg;i++)
+        for(int i=0;i<deg;i++)
             messageSenderThreads[i].join();
     }
 
@@ -206,7 +144,7 @@ class Node{
                 exit(-1);
             }
             // Listen to the client
-            if (listen(serverSocket, (inDeg)) < 0) {
+            if (listen(serverSocket, (deg)) < 0) {
                 perror("listen() failed");
                 exit(-1);
             }
@@ -223,15 +161,14 @@ class Node{
 
             // Clients not necessarily connect in usual order so 
             // we need to do propper maping of clients port to clientSocketid
-            for(int clientCounter=0;clientCounter<(inDeg);clientCounter++){ 
+            for(int clientCounter=0;clientCounter<(deg);clientCounter++){ 
                 // clientSocketIds[clientCounter] will store the socket file discripter
                 // for this connection
                 clientSocketIds[clientCounter] = accept(serverSocket, (struct sockaddr *) &clntAddr, &clntAddrLen);
 				if (clientSocketIds[clientCounter] < 0) {
 					perror("accept() failed");
 					exit(-1);
-				}
-                
+				}                
                 // now we need to which client connected 
                 // port_idx map will store the socket file descriptor for the connection between
                 // server id and clinet with port clntAddr.sin_port
@@ -349,12 +286,97 @@ class Node{
                 vector <string> sendersStrings = parseString(message);
                 for(auto senderString : sendersStrings){
 
-                    time_t RecvTime=time(NULL); // build string to log to file
-                    string formatted_time=Helper::get_formatted_time(RecvTime);
                     // senderId = id of node to which we have to send message
                     // int recieverSocket = clientServerSocket[{senderId,id}];
                     // clientServerSocketLock.unlock();
+                    char type = senderString[0];                    
+                    int senderId = parseQueryString(senderString);
 
+                    switch(type){
+						case 'r': // round 
+							{
+								if(state == interm){
+									 for(auto child:neighBourVertices){
+										 if(child != parent){
+											 int recieverSocket = clientServerSocket[{child,id}];
+											 string message = "[r*"+to_string(id)+"]";
+											 sendMessageToSocket(recieverSocket,message);
+										 }
+									 }
+								}else{
+									for(auto child:neighBourVertices){
+										if(child != parent){
+											int recieverSocket = clientServerSocket[{child,id}];
+											string message = "[p*"+to_string(id)+"]";
+											sendMessageToSocket(recieverSocket,message);
+										}
+									}
+
+								}
+
+								roundRecieved();
+							}
+                        case 'p' : // probe
+                            {
+                                if(parent == -1){
+									parent = senderId;
+									state = new_leaf;
+									int recieverSocket = clientServerSocket[{senderId,id}];
+									string message = "[a*"+to_string(id)+"]";
+									sendMessageToSocket(recieverSocket,message);
+								}
+								else{
+									int recieverSocket = clientServerSocket[{senderId,id}];
+									string message = "[r*"+to_string(id)+"]";
+									sendMessageToSocket(recieverSocket,message);
+								}
+                            }
+                        
+						case 't' : // reject
+							{
+								others.insert(senderId);
+								if(others.size() == (neighBourVertices.size() -1)){
+									int recieverSocket = clientServerSocket[{parent,id}];
+									string message = "[f*"+to_string(id)+"]";
+								}
+
+							}
+						case 'a' : // ack
+							{
+								childs.insert(senderId);
+								if(state != interm)
+									interm_flag = true;
+							}
+						case 'u' :
+							{
+								phased.insert(senderId);
+							}
+						case 'f' :
+							{
+								finished.insert(senderId);
+								if((finished.size() == (neighBourVertices.size() - 1 ) && (state == interm))){
+									int recieverSocket = clientServerSocket[{parent,id}];
+									string message = "[f*"+to_string(id)+"]";
+								}
+
+							}
+						case 'm' : // terminate 
+							{
+								if(neighBourVertices.size() !=1){
+									for(auto child:neighBourVertices){
+										if(child != parent){
+											int recieverSocket = clientServerSocket[{child,id}];
+											string message = "[m*"+to_string(id)+"]";
+											sendMessageToSocket(recieverSocket,message);
+										}
+									}
+								}
+
+								break;
+							}	
+                    }
+
+                    cout<<senderString<<" "<<id<<endl;
                     // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);              
 
                   
@@ -363,6 +385,10 @@ class Node{
             }
 
         }
+
+		void roundRecieved(){
+
+		}
         int sendMessageToSocket(int recieverSocket,string message){
             int serverSleepTime = exponential_lSend(eng);
             usleep(serverSleepTime*100);
@@ -370,14 +396,13 @@ class Node{
             return sentLen;
         }
         void sendMessage(){
-         
-                cout<<"Send message"<<endl;
-                // int reciever = outDegreeVertices[randomOutDegreeIndex] ;
-                // clientServerSocketLock.lock();
-                // int recieverSocket = clientServerSocket[{reciever,id}];
-                // clientServerSocketLock.unlock();
-                // string message = "some message"
-                // ssize_t sentLen = sendMessageToSocket(recieverSocket,message);                                 
+
+            for(auto reciever:neighBourVertices){
+                int recieverSocket = clientServerSocket[{reciever,id}];
+                string message = "[p*"+to_string(id)+"]";   
+                sendMessageToSocket(recieverSocket,message);
+            }
+            // all probe initial messages sent
 		}
 
       
@@ -385,25 +410,50 @@ class Node{
         // and get the x,vt[x] pairs using which vector time of
         // the listner process will be updated
         vector< string> parseString(string str){
-            // vector< string> senderStrings;        
-            // return senderStrings;
-        }       
+            vector< string> senderStrings;
+            for(int i=0;i<str.size();i++){
+                if(str[i]=='['){
+                    i++;
+                    string temp;                    
+                    while(str[i] != ']'){
+                        temp+=str[i];
+                        i++;
+                    }
+                    senderStrings.push_back(temp);
+                    temp.clear();
+                }               
+            }
+            return senderStrings;
+        }
 
-        // creates listner thread total no is given by indegree of this node in the graph
+        int parseQueryString(string str){
+            int queryResponse;
+            string temp;
+            int i = 1;
+            while(i<str.size()){
+                temp+=str[i];
+                i++;
+            }
+            int senderId = stoll(temp);
+            return senderId;           
+        }   
+  
+
+        // creates listner thread total no is given by degree of this node in the graph
         void initClientListnerThreads(){
-            for(int i=0;i<inDeg;i++)
+            for(int i=0;i<deg;i++)
                 {
-					clientListenerThreads[i] = thread(&Node::listenForMessage,this,inDegreeVertices[i]);
+					clientListenerThreads[i] = thread(&Node::listenForMessage,this,neighBourVertices[i]);
                 }
         }
 
         // We initialize connection ports for the message sender threads
-        // total no given by outdegree of node in graph
+        // total no given by degree of node in graph
 		void initConnectionPorts(){
-			for(int i=0;i<(outDeg);i++){
-    			messageSenderThreads[i] = thread(&Node::setUpConnectionPort,this , serverPortSeed+outDegreeVertices[i] , outDegreeVertices[i]);
+			for(int i=0;i<(deg);i++){
+    			messageSenderThreads[i] = thread(&Node::setUpConnectionPort,this , serverPortSeed+neighBourVertices[i] , neighBourVertices[i]);
             }
-            for(int i=0;i<outDeg;i++){
+            for(int i=0;i<deg;i++){
                 messageSenderThreads[i].join();
             }
 		}
@@ -437,7 +487,7 @@ int main()
     srand(time(NULL));
     serverPortSeed = Helper::getRandomNumber(20000,40000);
     clientPortSeed = Helper::getRandomNumber(40000 ,60000);
-    int totalIndeg = 0;
+    int totaldeg = 0;
     for(int i=1;i<=m;i++){  
         int u,v;
         input>>u>>v;
@@ -461,12 +511,16 @@ int main()
     }  
     while(listners > 0);
 
-
-
     cout<<"setup completed"<<endl;
     // initiator thread 
+
     nodes[1]->sendMessageThread();
     
     nodes[1]->SendMessageThreadJoin();
+
+    //while(finished < n);
+    sleep(10);
+
+    cout<<"DFS completed"<<endl;
     
 }
