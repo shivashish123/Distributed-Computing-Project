@@ -13,7 +13,7 @@ using namespace std;
 map <pair<int,int>,int> clientPortMap,clientServerSocket;
 std::default_random_engine eng;
 ofstream output,output2; 
-int serverPortSeed,clientPortSeed,m,n;
+int serverPortSeed,clientPortSeed,m,n,root;
 int waiting = 0;
 int messageCounter=0,listners=0;
 // mutex locks for mutual exclusion of shared variables
@@ -67,7 +67,7 @@ class Node{
 	thread* messageSenderThreads;
     vector<int> neighBourVertices;
     int* clientSocketIds ;
-    thread server,senderThread; 
+    thread server; 
     int totalSent = 1;
     int64_t t1;
     map <int,int> port_idx;
@@ -96,13 +96,7 @@ class Node{
     void setUpConnectionPorts(){ // setup conneciton ports for different recievers (degree)
         initConnectionPorts();
     }
-    void sendMessageThread(){ // start message sender thread
-        senderThread = thread(&Node::sendMessage,this);          
-    }
-    void SendMessageThreadJoin(){
-        cout<<"joined"<<endl;
-        senderThread.join();
-    }
+
     ~Node(){ // Destructor        
 
         clientListenerThread.join();
@@ -250,7 +244,7 @@ class Node{
             clientServerSocketLock.unlock();
         }
 
-		void listenForMessage(){
+		void bfs(){
             // buffer will store the message 
             char buffer[BUFSIZE];
             memset(buffer, 0, BUFSIZE); // reset the buffer
@@ -266,7 +260,6 @@ class Node{
                 while((socketToListen[i] = port_idx[clientPortId]) == 0 );
 
             }
-
             
             // We need clientPort as it is unique for every connection with different server 
             
@@ -278,6 +271,16 @@ class Node{
             listners--;
             listenerLock.unlock();
             cout<<"listening on all sockets for node :: "<<id<<endl;
+            if(id == root){
+
+                cout<<"Root sending initial messages\n";
+                for(auto reciever:neighBourVertices){
+                    int recieverSocket = clientServerSocket[{reciever,id}];
+                    string message = "[p]";   
+                    cout<<"sending message "<<message<<" "<<recieverSocket<<endl;
+                    sendMessageToSocket(recieverSocket,message);
+                }
+            }
             for(int i=0;i<deg;i++){
                 
                 while( recvLen =  recv(socketToListen[i], buffer, BUFSIZE - 1, 0) > 0){
@@ -291,7 +294,12 @@ class Node{
                         char type = senderString[0];                    
                         int senderId = neighBourVertices[i];
                         cout<<"message recieved "<<type<<endl; 
-                        switch(type){
+                        if(id == root){
+
+
+                        }
+                        else{
+                            switch(type){
                             case 'r': // round 
                                 {
                                     if(state == interm){
@@ -373,7 +381,9 @@ class Node{
 
                                     break;
                                 }	
+                            }
                         }
+                      
 
                     cout<<senderString<<" "<<id<<endl;
                     // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);        
@@ -417,19 +427,7 @@ class Node{
             ssize_t sentLen = send(recieverSocket,message.c_str(), strlen(message.c_str()), 0);
             return sentLen;
         }
-        void sendMessage(){
-
-            cout<<"sendMessage\n";
-            for(auto reciever:neighBourVertices){
-                int recieverSocket = clientServerSocket[{reciever,id}];
-                string message = "[p]";   
-                cout<<"sending message "<<message<<" "<<recieverSocket<<endl;
-                sendMessageToSocket(recieverSocket,message);
-            }
-            // all probe initial messages sent
-		}
-
-      
+           
         // Used by listener thread to parse the incomming string
         // and get the x,vt[x] pairs using which vector time of
         // the listner process will be updated
@@ -452,7 +450,7 @@ class Node{
 
         // creates listner thread total no is given by degree of this node in the graph
         void initClientListnerThreads(){
-			clientListenerThread = thread(&Node::listenForMessage,this);
+			clientListenerThread = thread(&Node::bfs,this);
         }
 
         // We initialize connection ports for the message sender threads
@@ -479,7 +477,7 @@ int main()
     output.open("Log.txt");
     output2.open("Log2.txt");
     string str2;        
-    input>>n>>m;
+    input>>n>>m>>root;
     eng.seed(4);
 
     vector <int> adjacencyList[n+5]; // to keep track of nodes whom I will send messages
@@ -519,10 +517,6 @@ int main()
 
     cout<<"setup completed"<<endl;
     // initiator thread 
-
-    nodes[1]->sendMessageThread();
-    
-    nodes[1]->SendMessageThreadJoin();
 
     //while(finished < n);
     sleep(10);
