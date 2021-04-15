@@ -18,7 +18,7 @@ double lDrift,lWkDrift, lP,lQ,lSend;
 int waiting = 0;
 int messageCounter=0,listners=0;
 // mutex locks for mutual exclusion of shared variables
-mutex waitingSetLock,portmapLock,clientServerSocketLock,clientPortMapLock,serverSocketFdsLock,listenerLock,fileLock;
+mutex waitingSetLock,portmapLock,clientServerSocketLock,clientPortMapLock,listenerLock,fileLock;
 vector <int> serverSocketfds;
 int finished = 0;
 /**
@@ -51,7 +51,8 @@ class Helper {
 enum State 
 {   
 	new_leaf,
-	interm
+	interm,
+    leaf
 };
 class Node{
 
@@ -61,10 +62,10 @@ class Node{
 	int serverPort;
 	int clientCounter = 1;
     int parent = -1;
-    bool leaf = false , interm_flag = false;
+    bool isleaf = false , interm_flag = false;
     set<int> childs,others,phased,finished;
     int deg;
-	thread* clientListenerThreads;
+	thread clientListenerThread;
 	thread* messageSenderThreads;
     vector<int> neighBourVertices;
     int* clientSocketIds ;
@@ -87,10 +88,8 @@ class Node{
         this->neighBourVertices  = neighBourVertices; // degree vertices in graph
         deg  = neighBourVertices.size();
         clientSocketIds = new int[n + 1];  // client sockets
-        clientListenerThreads = new thread[n + 1]; // threads memory allocation
         messageSenderThreads  = new thread[n + 1];
         this->id = id;   
-        sem_init(&waitingForResponse, 0, 0); // initialize semaphore
         init();
     }
     void startListenerThreads(){ // server setup completed create listner threads
@@ -109,8 +108,7 @@ class Node{
     }
     ~Node(){ // Destructor        
 
-        for(int i=0;i<deg;i++)
-            clientListenerThreads[i].join();
+        clientListenerThread.join();
 
         for(int i=0;i<deg;i++)
             messageSenderThreads[i].join();
@@ -255,139 +253,166 @@ class Node{
             clientServerSocketLock.unlock();
         }
 
-		void listenForMessage(int clientId){
+		void listenForMessage(){
             // buffer will store the message 
             char buffer[BUFSIZE];
             memset(buffer, 0, BUFSIZE); // reset the buffer
             ssize_t recvLen ;     
-            int socketToListen;
+            int socketToListen[deg];
             // clientPortMap will give the client's port for the connection between 
             // server id and client with id clientId
-            clientPortMapLock.lock();
-            int clientPortId = clientPortMap[{id,clientId}]; 
-            clientPortMapLock.unlock();
+            for(int i=0;i<neighBourVertices.size();i++){
+
+                clientPortMapLock.lock();
+                int clientPortId = clientPortMap[{id,neighBourVertices[i]}]; 
+                clientPortMapLock.unlock();
+                while((socketToListen[i] = port_idx[clientPortId]) == 0 );
+
+            }
+
             
             // We need clientPort as it is unique for every connection with different server 
             
             // port_idx will give the socket file descriptor for connection between server id
             // and client with clientport clientPortId
 
-            while((socketToListen = port_idx[clientPortId]) == 0 );
-            serverSocketFdsLock.lock();
-            usleep(1000);
-                serverSocketfds.push_back(socketToListen);
-            usleep(1000);
-            serverSocketFdsLock.unlock();
+           
             listenerLock.lock();
             listners--;
             listenerLock.unlock();
-            while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
-                string message = string(buffer);
-                vector <string> sendersStrings = parseString(message);
-                for(auto senderString : sendersStrings){
+            cout<<"listening on all sockets for node :: "<<id<<endl;
+            for(int i=0;i<deg;i++){
+                
+                while( recvLen =  recv(socketToListen[i], buffer, BUFSIZE - 1, 0) > 0){
+                    string message = string(buffer);
+                    vector <string> sendersStrings = parseString(message);
+                    for(auto senderString : sendersStrings){
 
-                    // senderId = id of node to which we have to send message
-                    // int recieverSocket = clientServerSocket[{senderId,id}];
-                    // clientServerSocketLock.unlock();
-                    char type = senderString[0];                    
-                    int senderId = parseQueryString(senderString);
+                        // senderId = id of node to which we have to send message
+                        // int recieverSocket = clientServerSocket[{senderId,id}];
+                        // clientServerSocketLock.unlock();
+                        char type = senderString[0];                    
+                        int senderId = neighBourVertices[i];
+                        cout<<"message recieved "<<type<<endl; 
+                        switch(type){
+                            case 'r': // round 
+                                {
+                                    if(state == interm){
+                                        for(auto child:neighBourVertices){
+                                            if(child != parent){
+                                                int recieverSocket = clientServerSocket[{child,id}];
+                                                string message = "[r]";
+                                                sendMessageToSocket(recieverSocket,message);
+                                            }
+                                        }
+                                    }else{
+                                        for(auto child:neighBourVertices){
+                                            if(child != parent){
+                                                int recieverSocket = clientServerSocket[{child,id}];
+                                                string message = "[p]";
+                                                sendMessageToSocket(recieverSocket,message);
+                                            }
+                                        }
 
-                    switch(type){
-						case 'r': // round 
-							{
-								if(state == interm){
-									 for(auto child:neighBourVertices){
-										 if(child != parent){
-											 int recieverSocket = clientServerSocket[{child,id}];
-											 string message = "[r*"+to_string(id)+"]";
-											 sendMessageToSocket(recieverSocket,message);
-										 }
-									 }
-								}else{
-									for(auto child:neighBourVertices){
-										if(child != parent){
-											int recieverSocket = clientServerSocket[{child,id}];
-											string message = "[p*"+to_string(id)+"]";
-											sendMessageToSocket(recieverSocket,message);
-										}
-									}
+                                    }
 
-								}
+                                    roundRecieved();
+                                }
+                            case 'p' : // probe
+                                {
+                                    if(parent == -1){
+                                        parent = senderId;
+                                        state = new_leaf;
+                                        int recieverSocket = clientServerSocket[{senderId,id}];
+                                        string message = "[a]";
+                                        sendMessageToSocket(recieverSocket,message);
+                                    }
+                                    else{
+                                        int recieverSocket = clientServerSocket[{senderId,id}];
+                                        string message = "[r]";
+                                        sendMessageToSocket(recieverSocket,message);
+                                    }
+                                }
+                            
+                            case 't' : // reject
+                                {
+                                    others.insert(senderId);
+                                    if(others.size() == (neighBourVertices.size() -1)){
+                                        int recieverSocket = clientServerSocket[{parent,id}];
+                                        string message = "[f]";
+                                    }
 
-								roundRecieved();
-							}
-                        case 'p' : // probe
-                            {
-                                if(parent == -1){
-									parent = senderId;
-									state = new_leaf;
-									int recieverSocket = clientServerSocket[{senderId,id}];
-									string message = "[a*"+to_string(id)+"]";
-									sendMessageToSocket(recieverSocket,message);
-								}
-								else{
-									int recieverSocket = clientServerSocket[{senderId,id}];
-									string message = "[r*"+to_string(id)+"]";
-									sendMessageToSocket(recieverSocket,message);
-								}
-                            }
-                        
-						case 't' : // reject
-							{
-								others.insert(senderId);
-								if(others.size() == (neighBourVertices.size() -1)){
-									int recieverSocket = clientServerSocket[{parent,id}];
-									string message = "[f*"+to_string(id)+"]";
-								}
+                                }
+                            case 'a' : // ack
+                                {
+                                    childs.insert(senderId);
+                                    if(state != interm)
+                                        interm_flag = true;
+                                }
+                            case 'u' :
+                                {
+                                    phased.insert(senderId);
+                                }
+                            case 'f' :
+                                {
+                                    finished.insert(senderId);
+                                    if((finished.size() == (neighBourVertices.size() - 1 ) && (state == interm))){
+                                        int recieverSocket = clientServerSocket[{parent,id}];
+                                        string message = "[f]";
+                                    }
 
-							}
-						case 'a' : // ack
-							{
-								childs.insert(senderId);
-								if(state != interm)
-									interm_flag = true;
-							}
-						case 'u' :
-							{
-								phased.insert(senderId);
-							}
-						case 'f' :
-							{
-								finished.insert(senderId);
-								if((finished.size() == (neighBourVertices.size() - 1 ) && (state == interm))){
-									int recieverSocket = clientServerSocket[{parent,id}];
-									string message = "[f*"+to_string(id)+"]";
-								}
+                                }
+                            case 'm' : // terminate 
+                                {
+                                    if(neighBourVertices.size() !=1){
+                                        for(auto child:neighBourVertices){
+                                            if(child != parent){
+                                                int recieverSocket = clientServerSocket[{child,id}];
+                                                string message = "[m]";
+                                                sendMessageToSocket(recieverSocket,message);
+                                            }
+                                        }
+                                    }
 
-							}
-						case 'm' : // terminate 
-							{
-								if(neighBourVertices.size() !=1){
-									for(auto child:neighBourVertices){
-										if(child != parent){
-											int recieverSocket = clientServerSocket[{child,id}];
-											string message = "[m*"+to_string(id)+"]";
-											sendMessageToSocket(recieverSocket,message);
-										}
-									}
-								}
-
-								break;
-							}	
-                    }
+                                    break;
+                                }	
+                        }
 
                     cout<<senderString<<" "<<id<<endl;
-                    // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);              
-
-                  
+                    // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);        
                     memset(buffer, 0, BUFSIZE); // reset buffer
+                    }
                 }
-            }
 
+            }  
         }
 
 		void roundRecieved(){
+            set <int> temp,temp2;
+            for(auto p:childs)
+                temp.insert(p);
+            for(auto p:others)
+                temp.insert(p);
 
+            for(auto p:phased)
+                temp2.insert(p);
+            for(auto p:finished)
+                temp2.insert(p);
+
+            if(((state == leaf) && (temp.size() == (neighBourVertices.size() - 1))) || ((state == interm) && (childs.size() == temp2.size())))
+                {
+                    string message = "[u]";
+                    int recieverSocket = clientServerSocket[{parent,id}];
+                    sendMessageToSocket(recieverSocket,message);                   
+                }
+            if(state == new_leaf){
+                state = leaf;
+            }
+            else if(interm_flag){
+                state = interm;
+            }
+            phased.clear();
+            others.clear();            
 		}
         int sendMessageToSocket(int recieverSocket,string message){
             int serverSleepTime = exponential_lSend(eng);
@@ -397,9 +422,11 @@ class Node{
         }
         void sendMessage(){
 
+            cout<<"sendMessage\n";
             for(auto reciever:neighBourVertices){
                 int recieverSocket = clientServerSocket[{reciever,id}];
-                string message = "[p*"+to_string(id)+"]";   
+                string message = "[p]";   
+                cout<<"sending message "<<message<<" "<<recieverSocket<<endl;
                 sendMessageToSocket(recieverSocket,message);
             }
             // all probe initial messages sent
@@ -426,25 +453,9 @@ class Node{
             return senderStrings;
         }
 
-        int parseQueryString(string str){
-            int queryResponse;
-            string temp;
-            int i = 1;
-            while(i<str.size()){
-                temp+=str[i];
-                i++;
-            }
-            int senderId = stoll(temp);
-            return senderId;           
-        }   
-  
-
         // creates listner thread total no is given by degree of this node in the graph
         void initClientListnerThreads(){
-            for(int i=0;i<deg;i++)
-                {
-					clientListenerThreads[i] = thread(&Node::listenForMessage,this,neighBourVertices[i]);
-                }
+			clientListenerThread = thread(&Node::listenForMessage,this);
         }
 
         // We initialize connection ports for the message sender threads
@@ -497,9 +508,9 @@ int main()
 
     for(int i=1;i<=n;i++){
         nodes[i] = new Node(adjacencyList[i], i); // create a node 
-        listners+= adjacencyList[i].size() ;
     }
-   
+    
+    listners = n;
    
     while(waiting>0); // Wait till the constructor has finished and server nodes are setup
     for(int i=1;i<=n;i++){
