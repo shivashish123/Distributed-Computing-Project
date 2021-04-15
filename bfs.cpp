@@ -14,12 +14,10 @@ map <pair<int,int>,int> clientPortMap,clientServerSocket;
 std::default_random_engine eng;
 ofstream output,output2; 
 int serverPortSeed,clientPortSeed,m,n;
-double lDrift,lWkDrift, lP,lQ,lSend;
 int waiting = 0;
 int messageCounter=0,listners=0;
 // mutex locks for mutual exclusion of shared variables
 mutex waitingSetLock,portmapLock,clientServerSocketLock,clientPortMapLock,listenerLock,fileLock;
-vector <int> serverSocketfds;
 int finished = 0;
 /**
  * Helper Class for get the formatted time in HH:MM:SS 
@@ -70,7 +68,6 @@ class Node{
     vector<int> neighBourVertices;
     int* clientSocketIds ;
     thread server,senderThread; 
-    sem_t waitingForResponse;
     int totalSent = 1;
     int64_t t1;
     map <int,int> port_idx;
@@ -485,10 +482,8 @@ int main()
     input>>n>>m;
     eng.seed(4);
 
-    vector <int> inverseAdjacencyList[n+5]; // to keep track of nodes that will send message to me
     vector <int> adjacencyList[n+5]; // to keep track of nodes whom I will send messages
     Node* nodes[n+5]; // Create n nodes
-
 
     waiting= n;
     // Input Handling
