@@ -6,7 +6,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <semaphore.h>
-#include <string>
 #define BUFSIZE 1024
 #define SERVERIP "127.0.0.1"
 #define pb push_back
@@ -15,12 +14,12 @@ map <pair<int,int>,int> clientPortMap,clientServerSocket;
 std::default_random_engine eng;
 ofstream output,output2; 
 int serverPortSeed,clientPortSeed,m,n,root;
+bool done=false;
 int waiting = 0;
+set<int>finishedSet;
 int messageCounter=0,listners=0;
 // mutex locks for mutual exclusion of shared variables
-mutex waitingSetLock,portmapLock,clientServerSocketLock,clientPortMapLock,listenerLock,fileLock;
-mutex visitLock;
-bool done = false;
+mutex waitingSetLock,portmapLock,clientServerSocketLock,clientPortMapLock,listenerLock,fileLock,finishedLock;
 int finished = 0;
 /**
  * Helper Class for get the formatted time in HH:MM:SS 
@@ -63,17 +62,17 @@ class Node{
 	int serverPort;
 	int clientCounter = 1;
     int parent = -1;
-    int level=-1;
-    bool isleaf = false , interm_flag = false;
+    bool isleaf = false , interm_flag = false , executionFinished = false , roundRecieved = false;
     set<int> childs,others,phased,finished;
     int deg;
-	thread clientListenerThread;
+	thread* clientListenerThreads;
 	thread* messageSenderThreads;
     vector<int> neighBourVertices;
     bool* visited;
     int* clientSocketIds ;
-    thread server; 
+    thread server,senderThread; 
     int totalSent = 1;
+    int roundNo = 1;
     int64_t t1;
     map <int,int> port_idx;
     std::exponential_distribution<double>exponential_lP;
@@ -82,6 +81,7 @@ class Node{
 	enum State state;
    
     public:
+    int level=-1;
     Node(vector<int> neighBourVertices,int id){
         // cout<<id<<" :: ";
         // for(auto k:neighBourVertices)
@@ -89,12 +89,13 @@ class Node{
         // cout<<endl;
         this->neighBourVertices  = neighBourVertices; // degree vertices in graph
         deg  = neighBourVertices.size();
-        visited = new bool[n+1];
         clientSocketIds = new int[n + 1];  // client sockets
-        messageSenderThreads  = new thread[n + 1];
-        this->id = id;   
+        visited = new bool[n+1];
         for(int j=1;j<=n;j++)
             visited[j]=false;
+        messageSenderThreads  = new thread[deg];
+        clientListenerThreads = new thread[deg];
+        this->id = id;   
         init();
     }
     void startListenerThreads(){ // server setup completed create listner threads
@@ -105,9 +106,25 @@ class Node{
         initConnectionPorts();
     }
 
+    void sendMessageThread(){ // start message sender thread
+        senderThread = thread(&Node::sendMessage,this);          
+    }
+    void SendMessageThreadJoin(){
+        cout<<"joined"<<endl;
+        senderThread.join();
+    }
+
+    void clientListenerThreadsJoin(){
+       for(int i=0;i<deg;i++)
+            clientListenerThreads[i].join();
+    }
+
+    int getParent(){
+        return parent;
+    }
+
     ~Node(){ // Destructor        
 
-        clientListenerThread.join();
 
         for(int i=0;i<deg;i++)
             messageSenderThreads[i].join();
@@ -252,22 +269,19 @@ class Node{
             clientServerSocketLock.unlock();
         }
 
-		void dfs(){
+		void dfs(int clientId){
             // buffer will store the message 
             char buffer[BUFSIZE];
             memset(buffer, 0, BUFSIZE); // reset the buffer
             ssize_t recvLen ;     
-            int socketToListen[deg];
+            int socketToListen;
             // clientPortMap will give the client's port for the connection between 
             // server id and client with id clientId
-            for(int i=0;i<neighBourVertices.size();i++){
 
-                clientPortMapLock.lock();
-                int clientPortId = clientPortMap[{id,neighBourVertices[i]}]; 
-                clientPortMapLock.unlock();
-                while((socketToListen[i] = port_idx[clientPortId]) == 0 );
-
-            }
+            clientPortMapLock.lock();
+            int clientPortId = clientPortMap[{id,clientId}]; 
+            clientPortMapLock.unlock();
+            while((socketToListen = port_idx[clientPortId]) == 0 );
             
             // We need clientPort as it is unique for every connection with different server 
             
@@ -278,78 +292,74 @@ class Node{
             listenerLock.lock();
             listners--;
             listenerLock.unlock();
-            cout<<"listening on all sockets for node :: "<<id<<endl;
+            while(listners > 0);          
+            mutex recvLock ;
+            while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
+            
+                recvLock.lock();
 
+                string message = string(buffer);
+                vector <string> sendersStrings = parseString(message);
+                for(auto senderString : sendersStrings){
 
-
-            if(id == root){
-                int reciever = neighBourVertices[0];
-                level = 0;
-                parent = id;
-                visitLock.lock();
-                visited[neighBourVertices[0]]=true;
-                visitLock.unlock();
-                cout<<"Root sending initial messages\n";
-                int recieverSocket = clientServerSocket[{reciever,id}];
-                string message = "["+ to_string(level) +"]";   
-                cout<<"sending message "<<message<<" "<<recieverSocket<<endl;
-                sendMessageToSocket(recieverSocket,message);
-            }
-            while(!done){
-                for(int i=0;i<deg;i++){
+                    // senderId = id of node to which we have to send message
+                    // int recieverSocket = clientServerSocket[{senderId,id}];
+                    // clientServerSocketLock.unlock();             
+                    int senderId = clientId;
+                    int temp_lev = stoi(senderString);
+                    //cout<<"message recieved: level -  "<<temp_lev<<" "<<id<<" from "<<senderId<<endl;
                     
-                    while( !done && (recvLen =  recv(socketToListen[i], buffer, BUFSIZE - 1, 0) > 0)){
-                        string message = string(buffer);
-                        vector <string> sendersStrings = parseString(message);
-                        for(string senderString : sendersStrings){
-
-                            // senderId = id of node to which we have to send message
-                            // int recieverSocket = clientServerSocket[{senderId,id}];
-                            // clientServerSocketLock.unlock();          
-                            int temp_lev = stoi(senderString);
-                            if(level==-1)
-                            {
-                                parent = neighBourVertices[i];
-                                level = temp_lev+1;
-                            }
-                            int unsearchedNeigh = -1;
-                            for(auto child:neighBourVertices){
-                                if(child != parent && !visited[child]){
-                                    unsearchedNeigh = child;
-                                    break;
-                                }
-                            }
-                            if(unsearchedNeigh==-1 && root==id)
-                            {
-                                done = true;
-                                cout<<"Exit";
-                            }
-                            else if(unsearchedNeigh==-1)
-                            {
-                                int recieverSocket = clientServerSocket[{parent,id}];
-                                string message = "["+ to_string(level-1) +"]";
-                                sendMessageToSocket(recieverSocket,message);
-                            }
-                            else
-                            {
-                                if(neighBourVertices[i]!=parent && !visited[neighBourVertices[i]])
-                                {
-                                    int recieverSocket = clientServerSocket[{parent,id}];
-                                    string message = "["+ to_string(temp_lev) +"]";
-                                    sendMessageToSocket(recieverSocket,message);
-                                }
-                                else
-                                {
-                                    int recieverSocket = clientServerSocket[{unsearchedNeigh,id}];
-                                    string message = "["+ to_string(level) +"]";
-                                    sendMessageToSocket(recieverSocket,message);
-                                }
-                            }         
-                        }     
-                        memset(buffer, 0, BUFSIZE); // reset buffer
+                    if(level==-1)
+                    {
+                        parent = senderId;
+                        level = temp_lev+1;
                     }
-                }
-            }  
+                    int unsearchedNeigh = -1;
+                    for(auto child:neighBourVertices){
+                        if(child != parent && !visited[child]){
+                            unsearchedNeigh = child;
+                            break;
+                        }
+                    }
+                    if(unsearchedNeigh==-1 && root==id)
+                    {
+                        done = true;
+                        cout<<"Exit";
+                    }
+                    else if(unsearchedNeigh==-1)
+                    {
+                        int recieverSocket = clientServerSocket[{parent,id}];
+                        string message = "["+ to_string(level-1) +"]";
+                        visited[parent]=true;
+                        sendMessageToSocket(recieverSocket,message);
+                    }
+                    else
+                    {
+                        if(senderId!=parent && !visited[senderId])
+                        {
+                            int recieverSocket = clientServerSocket[{senderId,id}];
+                            string message = "["+ to_string(temp_lev) +"]";
+                            visited[senderId]=true;
+                            sendMessageToSocket(recieverSocket,message);
+                        }
+                        else
+                        {
+                            int recieverSocket = clientServerSocket[{unsearchedNeigh,id}];
+                            string message = "["+ to_string(level) +"]";
+                            visited[unsearchedNeigh]=true;
+                            sendMessageToSocket(recieverSocket,message);
+                        }
+                    }
+                    
+                }                        
+
+                // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);        
+                memset(buffer, 0, BUFSIZE); // reset buffer
+            }
+            recvLock.unlock();
+            
+
+                
         }
 
         int sendMessageToSocket(int recieverSocket,string message){
@@ -359,6 +369,20 @@ class Node{
             return sentLen;
         }
            
+        void sendMessage(){
+
+            int reciever = neighBourVertices[0];
+            level = 0;
+            parent = id;
+            visited[neighBourVertices[0]]=true;
+            cout<<"Root sending initial messages\n";
+            int recieverSocket = clientServerSocket[{reciever,id}];
+            string message = "["+ to_string(level) +"]";   
+            cout<<"sending message "<<message<<" "<<recieverSocket<<endl;
+            sendMessageToSocket(recieverSocket,message);
+            // all probe initial messages sent
+		}
+
         // Used by listener thread to parse the incomming string
         // and get the x,vt[x] pairs using which vector time of
         // the listner process will be updated
@@ -381,7 +405,9 @@ class Node{
 
         // creates listner thread total no is given by degree of this node in the graph
         void initClientListnerThreads(){
-			clientListenerThread = thread(&Node::dfs,this);
+            for(int i=0;i<deg;i++){
+                clientListenerThreads[i] = thread(&Node::dfs,this,neighBourVertices[i]);
+            }
         }
 
         // We initialize connection ports for the message sender threads
@@ -444,14 +470,22 @@ int main()
     for(int i=1;i<=n;i++){
         nodes[i]->startListenerThreads();
     }  
-    while(listners > 0);
+    
 
     cout<<"setup completed"<<endl;
     // initiator thread 
 
-    //while(finished < n);
-    sleep(10);
+    nodes[root]->sendMessageThread();
+    
+    nodes[root]->SendMessageThreadJoin();
+
+
+    while(!done);   
 
     cout<<"DFS completed"<<endl;
+
+    for(int i=1;i<=n;i++){
+        cout<<i<<" "<<nodes[i]->getParent()<<endl;
+    }
     
 }
