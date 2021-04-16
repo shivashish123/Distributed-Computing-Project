@@ -1,0 +1,25 @@
+connection ports setup
+setup completed
+joined
+sending message to 2message recieved 
+p 2 from 1
+message recieved p 3 from 1
+sending message to 3
+message recieved a 1 from 2
+message recieved a 1 from 3
+message recieved r 2 from 1
+message recieved r 3 from 1
+message recieved p 3 from 2
+message recieved p 2 from 3
+message recieved tmessage recieved  t3 from 2 
+2 from 3
+message recieved f 1 from 3
+message recieved f 1 from 2
+message recieved m 2 from 1
+term message 2
+message recieved m 3 from 1
+term message 3
+message recieved m 3 from 2
+term message 3
+message recieved m 2 from 3
+term message 2
