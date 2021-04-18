@@ -10,8 +10,8 @@ int rand(int a, int b) {
 
 int main(int argc, char* argv[]) {
     srand(atoi(argv[1]));
-    int n = rand(2, 4);
-    int m = rand(n-1,n*(n-1)/2);
+    int n = rand(6, 50);
+    int m = rand(n-1,(n*(n-1))/2);
     printf("%d %d 1\n", n , m);
     set<pair<int,int>> edges;
     for(int i = 2; i <= n; ++i) {

@@ -77,6 +77,8 @@ class Node{
     std::exponential_distribution<double>exponential_lQ;
     std::exponential_distribution<double>exponential_lSend;
 	enum State state;
+    mutex recvLock ;
+
    
     public:
     Node(vector<int> neighBourVertices,int id){
@@ -287,7 +289,7 @@ class Node{
             listners--;
             listenerLock.unlock();
             while(listners > 0);          
-            mutex recvLock ;
+
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
             
                 recvLock.lock();
@@ -301,7 +303,7 @@ class Node{
                     // clientServerSocketLock.unlock();
                     char type = senderString[0];                    
                     int senderId = clientId;
-                    cout<<"message recieved "<<type<<" "<<id<<" from "<<senderId<<endl; 
+                    cout<<"message recieved "<<type<<" "<<id<<" from "<<senderId<<" "<<"state "<<state<<endl; 
                     if(id == root){
                         switch(type){
                             case 'a': 
@@ -334,6 +336,8 @@ class Node{
                                 }
 
                         }
+
+                        cout<<phased.size() <<" "<<neighBourVertices.size()<<endl;
 
                         if(phased.size() == neighBourVertices.size()){
                             roundNo = roundNo + 1;
@@ -451,7 +455,7 @@ class Node{
                 // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);        
                 memset(buffer, 0, BUFSIZE); // reset buffer
                 }
-                recvLock.unlock();
+                
             
 
                 if(roundRecieved){
@@ -468,29 +472,32 @@ class Node{
                         temp2.insert(p);
                     
 
-                    cout<<state<<" ***** "<<temp.size()<<" "<<childs.size()<<endl;
+                    cout<<state<<" ***** "<<temp.size()<<" "<<childs.size()<<" "<<interm_flag<<endl;
                     if(((state == leaf) && (temp.size() == (neighBourVertices.size() - 1))) || ((state == interm) && (childs.size() == temp2.size())))
-                        {
-                            string message = "[u]";
-                            int recieverSocket = clientServerSocket[{parent,id}];
-                            sendMessageToSocket(recieverSocket,message);     
-
-                            if(interm_flag){
-                                state = interm;
-                            }
-                            phased.clear();
-                            others.clear();    
-                            roundRecieved = false;              
+                    {
+                        string message = "[u]";
+                        int recieverSocket = clientServerSocket[{parent,id}];
+                        sendMessageToSocket(recieverSocket,message);     
+                        cout<<"sending upcase message\n";
+                        if(interm_flag){
+                            state = interm;
+                            cout<<"state"<<" "<<state<<" --upcase message\n";
                         }
+                        phased.clear();
+                        others.clear();    
+                        roundRecieved = false;              
                     }
                 }
-            }
 
-        int sendMessageToSocket(int recieverSocket,string message){
+                recvLock.unlock();
+            }
+        }
+
+        void sendMessageToSocket(int recieverSocket,string message){
             int serverSleepTime = exponential_lSend(eng);
             usleep(serverSleepTime*100);
             ssize_t sentLen = send(recieverSocket,message.c_str(), strlen(message.c_str()), 0);
-            return sentLen;
+            return;
         }
            
         void sendMessage(){
