@@ -359,11 +359,18 @@ class Node{
                                         }
                                     }
                                 }else{
-                                    for(auto child:neighBourVertices){
-                                        if(child != parent){
-                                            int recieverSocket = clientServerSocket[{child,id}];
-                                            string message = "[p]";
-                                            sendMessageToSocket(recieverSocket,message);
+                                    if(neighBourVertices.size() == 1){
+                                        int recieverSocket = clientServerSocket[{parent,id}];
+                                        string message = "[f]";
+                                        sendMessageToSocket(recieverSocket,message);
+                                    }
+                                    else{
+                                        for(auto child:neighBourVertices){
+                                            if(child != parent){
+                                                int recieverSocket = clientServerSocket[{child,id}];
+                                                string message = "[p]";
+                                                sendMessageToSocket(recieverSocket,message);
+                                            }
                                         }
                                     }
 
@@ -415,7 +422,7 @@ class Node{
                         case 'f' : // finish
                             {
                                 finished.insert(senderId);
-                                if((finished.size() == (neighBourVertices.size() - 1 ) && (state == interm))){
+                                if(((finished.size() == (childs.size() )) && (state == interm))){
                                     int recieverSocket = clientServerSocket[{parent,id}];
                                     string message = "[f]";
                                     sendMessageToSocket(recieverSocket,message);
@@ -549,6 +556,7 @@ int main()
     output2.open("Log2.txt");
     string str2;        
     input>>n>>m>>root;
+    cin>>n>>m>>root;
     eng.seed(4);
 
     vector <int> adjacencyList[n+5]; // to keep track of nodes whom I will send messages
@@ -560,16 +568,19 @@ int main()
     // Using this as base seed client and server threads will compute their port numbers
 
     srand(time(NULL));
-    serverPortSeed = Helper::getRandomNumber(20000,40000);
-    clientPortSeed = Helper::getRandomNumber(40000 ,60000);
+    serverPortSeed = Helper::getRandomNumber(2000,4000);
+    clientPortSeed = Helper::getRandomNumber(4000 ,6000);
     int totaldeg = 0;
     for(int i=1;i<=m;i++){  
         int u,v;
-        input>>u>>v;
+        // input>>u>>v;
+        cin>>u>>v;
         adjacencyList[u].pb(v);
         adjacencyList[v].pb(u);       
     }
 
+
+    
     for(int i=1;i<=n;i++){
         nodes[i] = new Node(adjacencyList[i], i); // create a node 
     }
@@ -577,6 +588,7 @@ int main()
     listners = n;
    
     while(waiting>0); // Wait till the constructor has finished and server nodes are setup
+    cout<<"Here"<<endl;
     for(int i=1;i<=n;i++){
         nodes[i]->setUpConnectionPorts();
     }
