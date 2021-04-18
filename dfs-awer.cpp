@@ -81,7 +81,9 @@ class Node{
     std::exponential_distribution<double>exponential_lQ;
     std::exponential_distribution<double>exponential_lSend;
 	enum State state;
-   
+    mutex recvLock ;
+    
+
     public:
     int level=-1;
     Node(vector<int> neighBourVertices,int id){
@@ -294,13 +296,14 @@ class Node{
             listenerLock.lock();
             listners--;
             listenerLock.unlock();
-            while(listners > 0);          
-            mutex recvLock ;
+            while(listners > 0);  
+
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
-            
+                
                 recvLock.lock();
 
                 string message = string(buffer);
+                cout<<message<<" "<<id<<endl;
                 vector <string> sendersStrings = parseString(message);
                 for(string senderString : sendersStrings){
 
@@ -317,7 +320,7 @@ class Node{
                     else
                     {
                         int temp_lev = stoi(senderString);
-                        //cout<<"message recieved: level -  "<<temp_lev<<" "<<id<<" from "<<senderId<<endl;
+                        cout<<"message recieved: level -  "<<temp_lev<<" "<<id<<" from "<<senderId<<endl;
                         
                         if(level==-1)
                         {
@@ -366,8 +369,8 @@ class Node{
 
                 // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);        
                 memset(buffer, 0, BUFSIZE); // reset buffer
+                recvLock.unlock();
             }
-            recvLock.unlock();
             
 
                 
@@ -398,7 +401,7 @@ class Node{
             cout<<"Root sending initial messages\n";
             int recieverSocket = clientServerSocket[{reciever,id}];
             string message = "["+ to_string(level) +"]";   
-            cout<<"sending message "<<message<<" "<<reciever<<endl;
+            cout<<"sending message "<<message<<" "<<reciever<<" "<<recieverSocket<<endl;
             sendMessageToSocket(recieverSocket,message);
             // all probe initial messages sent
 		}

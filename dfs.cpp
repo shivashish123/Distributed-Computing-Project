@@ -79,6 +79,8 @@ class Node{
     std::exponential_distribution<double>exponential_lQ;
     std::exponential_distribution<double>exponential_lSend;
 	enum State state;
+    mutex recvLock ;
+
    
     public:
     int level=-1;
@@ -293,7 +295,6 @@ class Node{
             listners--;
             listenerLock.unlock();
             while(listners > 0);          
-            mutex recvLock ;
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
             
                 recvLock.lock();
