@@ -62,7 +62,6 @@ class Node{
 	int serverPort;
 	int clientCounter = 1;
     int parent = -1;
-    bool isleaf = false , interm_flag = false , executionFinished = false , roundRecieved = false;
     set<int> childs,others,phased,finished;
     int deg;
 	thread* clientListenerThreads;
@@ -432,14 +431,14 @@ int main()
     output.open("Log.txt");
     output2.open("Log2.txt");
     string str2;        
-    input>>n>>m>>root;
+    cin>>n>>m>>root;
     eng.seed(4);
 
     vector <int> adjacencyList[n+5]; // to keep track of nodes whom I will send messages
     Node* nodes[n+5]; // Create n nodes
 
     waiting= n;
-    // Input Handling
+    // cin Handling
     // Create random serverPortSeed and ClientPortSeed 
     // Using this as base seed client and server threads will compute their port numbers
 
@@ -449,7 +448,7 @@ int main()
     int totaldeg = 0;
     for(int i=1;i<=m;i++){  
         int u,v;
-        input>>u>>v;
+        cin>>u>>v;
         adjacencyList[u].pb(v);
         adjacencyList[v].pb(u);       
     }

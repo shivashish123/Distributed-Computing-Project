@@ -457,7 +457,7 @@ int main()
     output.open("Log.txt");
     output2.open("Log2.txt");
     string str2;        
-    input>>n>>m>>root;
+    cin>>n>>m>>root;
     eng.seed(4);
 
     vector <int> adjacencyList[n+5]; // to keep track of nodes whom I will send messages
@@ -474,7 +474,7 @@ int main()
     int totaldeg = 0;
     for(int i=1;i<=m;i++){  
         int u,v;
-        input>>u>>v;
+        cin>>u>>v;
         adjacencyList[u].pb(v);
         adjacencyList[v].pb(u);       
     }
@@ -484,7 +484,6 @@ int main()
     }
     
     listners = n;
-   
     while(waiting>0); // Wait till the constructor has finished and server nodes are setup
     for(int i=1;i<=n;i++){
         nodes[i]->setUpConnectionPorts();
