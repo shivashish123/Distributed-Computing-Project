@@ -80,7 +80,6 @@ class Node{
     std::exponential_distribution<double>exponential_lSend;
 	enum State state;
     mutex recvLock ;
-
    
     public:
     int level=-1;
@@ -295,6 +294,7 @@ class Node{
             listners--;
             listenerLock.unlock();
             while(listners > 0);          
+            
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
             
                 recvLock.lock();
@@ -356,11 +356,8 @@ class Node{
 
                 // ssize_t sentLen = sendMessageToSocket(recieverSocket,responseString);        
                 memset(buffer, 0, BUFSIZE); // reset buffer
+                recvLock.unlock();
             }
-            recvLock.unlock();
-            
-
-                
         }
 
         int sendMessageToSocket(int recieverSocket,string message){
